@@ -1,0 +1,6 @@
+[[events_observer]]
+endpoint = "@@SIGNER_ENDPOINT@@"
+retry_count = 255
+# include_data_events = false
+events_keys = ["stackerdb", "block_proposal", "burn_blocks"]
+

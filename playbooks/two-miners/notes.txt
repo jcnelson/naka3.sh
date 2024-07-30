@@ -1,0 +1,3 @@
+* sparse block mining -- multiple winning sortitions without tenure-start blocks
+* delay in processing pushed blocks relative to winning consensus hash
+* signer timeouts 

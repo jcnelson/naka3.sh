@@ -1,0 +1,7 @@
+stacks_private_key = "@@SIGNER_KEY@@"
+node_host = "@@STACKS_HOST@@:@@STACKS_RPC_PORT@@"
+endpoint = "@@SIGNER_HOST@@:@@SIGNER_PORT@@"
+network = "testnet"
+auth_password = "12345"
+db_path = "@@SIGNER_DB@@"
+reward_cycle = "1"
