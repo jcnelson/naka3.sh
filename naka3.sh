@@ -649,13 +649,23 @@ function hex_encode() {
 # $1: base58 text
 # from https://github.com/grondilu/bitcoin-bash-tools
 function b58_decode() {
-   local base58_chars="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxy"
-   local b58text="$1"
-   if [[ "$b58text" =~ ^(1*)([$base58_chars]+)$ ]]; then
-      dc -e "${BASH_REMATCH[1]//1/0P} 0${base58_chars//?/ds&1+} 0${BASH_REMATCH[2]//?/ 58*l&+}P" | hex_encode
-   else
-      return 1
-   fi
+   local base58_chars="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+   local base58_text="$1"
+   local base58_length=${#base58_chars}
+   local result="0"
+   local i=0
+   local char
+   local value
+
+   for (( i=0; i<${#base58_text}; i++ )); do
+       char="${base58_text:i:1}"
+       value=$(expr index "$base58_chars" "$char")
+       value=$((value - 1))
+       result=$(echo "$result * $base58_length + $value" | bc)
+   done
+
+   # Convert the result to hex using bc and xxd without printf
+   echo "obase=16; $result" | bc | xxd -r -p | xxd -p
 }
 
 # Decode a base58 Bitcoin address into "$version_byte $hash_bytes"
@@ -663,7 +673,10 @@ function b58_decode() {
 # prints the above
 function b58_address_decode() {
    local addr="$1"
-   b58_decode "$addr" | sed -r 's/^([0-9a-f]{2})([0-9a-f]{40}).+$/\1 \2#/g' | tr '#' '\n'
+   local decoded_hex=$(b58_decode "$addr")
+   local version_byte="${decoded_hex:0:2}"
+   local hash_bytes="${decoded_hex:2:40}"
+   echo "$version_byte $hash_bytes"
 }
 
 # Make a signer's stacking transaction
