@@ -11,8 +11,9 @@ You need the following in your `$PATH`:
 * `stacks-signer`
 * `jq`
 * `dc`
+* `bc`
 * `bash` 5.0 or higher
-* The usual GNU coreutils (`grep`, `sed`, etc)
+* The usual GNU coreutils (`grep`, `sed`, `xxd`, etc)
 
 ### Quick Start
 
