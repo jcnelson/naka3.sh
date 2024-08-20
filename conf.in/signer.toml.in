@@ -5,3 +5,4 @@ network = "testnet"
 auth_password = "12345"
 db_path = "@@SIGNER_DB@@"
 reward_cycle = "1"
+first_proposal_burn_block_timing = 5
