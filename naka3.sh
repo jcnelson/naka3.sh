@@ -2,7 +2,7 @@
 
 set -uoe pipefail
 
-DEBUG=0
+DEBUG=1
 CONFIG="./config.sh"
 PROGNAME="$0"
 TEMPLATES="$(dirname "$PROGNAME")/conf.in"
@@ -356,11 +356,14 @@ function start_signer() {
 }
 
 # Make a stacks node config file
+# Call this _after_ generating signer config files
 # $1: config file
 # $2: node ID
 # $3: template file
 # $4: event observer template file
 # $5: miner (true/false)
+# $6: stacker (true/false)
+# $7: associated signer IDs as a CSV (pass 'none' if there is none)
 # prints the path
 function make_node_config() {
    local conf_path="$1"
@@ -368,6 +371,9 @@ function make_node_config() {
    local template_path="$3"
    local event_observer_template_path="$4"
    local miner="$5"
+   local stacker="$6"
+   local signers="$7"
+
    local port
    local rpcport
    local miner_key
@@ -413,13 +419,14 @@ function make_node_config() {
       -e "s!@@STACKS_MINER_KEY@@!$miner_key!g" \
       -e "s!@@STACKS_PEER_KEY@@!$peer_key!g" \
       -e "s!@@STACKS_MINER@@!$miner!g" \
+      -e "s!@@STACKS_STACKER@@!$stacker!g" \
       -e "s!@@BITCOIN_HOST@@!$btc_host!g" \
       -e "s!@@BITCOIN_P2P_PORT@@!$btc_port!g" \
       -e "s!@@BITCOIN_RPC_PORT@@!$btc_rpcport!g" \
       -e "s!@@STACKS_DATA_DIR@@!$datadir!g" \
       "$template_path" > "$node_conf_path"
 
-   if [ "$miner" = "1" ] || [ "$miner" = "true" ]; then
+   if [ "$signers" != "none" ]; then
       # load up all signer endpoints
       signer_datadir="$(conf_get_stacks_signer_data_dir)"
       
@@ -427,7 +434,21 @@ function make_node_config() {
       local endpoint
       local signer_host
       local signer_port
-      for signer_conf in "$signer_datadir"/*.toml; do
+      local cur_signer
+      local remaining_signers
+
+      signers="$signers,"
+      while [ -n "$signers" ]; do
+         signers="${signers#,}"
+         remaining_signers="${signers#*,}"
+         cur_signer="${signers%"$remaining_signers"}"
+         cur_signer="${cur_signer%,}"
+
+         signers="$remaining_signers"
+
+         debug "Add signer '$cur_signer', remaining is '$signers'"
+
+         signer_conf="$signer_datadir/signer-${cur_signer}.toml"
          # extract the endpoint
          endpoint="$(grep -E "^endpoint[^=]*=" "$signer_conf" | \
             sed -r 's/^endpoint[^=]*=[ ]*"(.+)"[ ]*$/\1/g')"
@@ -450,16 +471,21 @@ function make_node_config() {
    return 0
 }
 
-# Start a stacks node
+# Start a stacks node.
+# Call _after_ generating signer configs
 # Writes the PID to the given .pid file
 # $1: config file
 # $2: node ID
 # $3: is miner?
+# $4: is stacker?
+# $5: signer IDs as a CSV (pass 'none' to skip)
 # prints the result
 function start_node() {
    local conf_path="$1"
    local node_id="$2"
    local miner="$3"
+   local stacker="$4"
+   local signers="$5"
    local pid_path
    local node_config_template_path
    local node_config_path
@@ -469,7 +495,7 @@ function start_node() {
    logfile="$(get_node_logfile_path "$conf_path" "$node_id")"
    node_config_template_path="$(get_node_template_path)"
    node_event_observer_config_template_path="$(get_node_event_observer_template_path)"
-   node_config_path="$(make_node_config "$conf_path" "$node_id" "$node_config_template_path" "$node_event_observer_config_template_path" "$miner")"
+   node_config_path="$(make_node_config "$conf_path" "$node_id" "$node_config_template_path" "$node_event_observer_config_template_path" "$miner" "$stacker" "$signers")"
    datadir="$(get_node_data_dir "$conf_path" "$node_id")"
 
    if [ -f "$pid_path" ]; then
@@ -721,7 +747,7 @@ function usage() {
          exit_error "Usage: $PROGNAME signer [signer_id] config|start|stop|logs|stack-tx"
          ;;
       node)
-         exit_error "Usage: $PROGNAME node [node_id] config-miner|config-follower|miner-addr|start-miner|start-follower|stop|logs"
+         exit_error "Usage: $PROGNAME node [node_id] config-miner|config-follower|config-miner-stacker|config-follower-stacker|miner-addr|start-miner|start-miner-stacker|start-follower|start-follower-stacker|stop|logs"
          ;;
       "$PROGNAME")
          exit_error "Need a command"
@@ -905,6 +931,10 @@ function main() {
 
          local subcmd="$3"
          debug "Subcommand is '$subcmd'"
+
+         local signers="$4"
+         debug "Signers is '$signers'"
+
          set -ue
 
          if [ -z "$node_id" ]; then
@@ -913,6 +943,10 @@ function main() {
 
          if [ -z "$subcmd" ]; then
             usage "node"
+         fi
+
+         if [ -z "$signers" ]; then
+            signers="none"
          fi
 
          case "$subcmd" in
@@ -927,7 +961,15 @@ function main() {
             config-miner)
                echo -n "Making miner config for node '$node_id'... "
                local node_config_path
-               node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "true")"
+               node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "true" "false" "$signers")"
+
+               echo "$node_config_path"
+               ;;
+            
+            config-miner-stacker)
+               echo -n "Making miner-stacker config for node '$node_id'... "
+               local node_config_path
+               node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "true" "true" "$signers")"
 
                echo "$node_config_path"
                ;;
@@ -935,19 +977,37 @@ function main() {
             config-follower)
                echo -n "Making follower config for node '$node_id'... "
                local node_config_path
-               node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "false")"
+               node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "false" "false" "$signers")"
+
+               echo "$node_config_path"
+               ;;
+            
+            config-follower-stacker)
+               echo -n "Making follower-stacker config for node '$node_id'... "
+               local node_config_path
+               node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "false" "true" "$signers")"
 
                echo "$node_config_path"
                ;;
 
             start-miner)
                echo -n "Starting miner node '$node_id'... "
-               start_node "$CONFIG" "$node_id" "true"
+               start_node "$CONFIG" "$node_id" "true" "false" "$signers"
+               ;;
+            
+            start-miner-stacker)
+               echo -n "Starting miner-stacker node '$node_id'... "
+               start_node "$CONFIG" "$node_id" "true" "true" "$signers"
                ;;
             
             start-follower)
                echo -n "Starting follower node '$node_id'... "
-               start_node "$CONFIG" "$node_id" "false"
+               start_node "$CONFIG" "$node_id" "false" "$stacker" "$signers"
+               ;;
+            
+            start-follower-stacker)
+               echo -n "Starting follower-stacker node '$node_id'... "
+               start_node "$CONFIG" "$node_id" "false" "true" "$signers"
                ;;
 
             stop)
