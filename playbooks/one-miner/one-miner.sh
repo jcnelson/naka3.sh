@@ -1,5 +1,20 @@
 #!/bin/bash
 
+# Topology:
+#
+#
+#            `bitcoind 0`
+#                 |
+#                 |
+#                 V
+#             `stacks 0`
+#             `(miner) `
+#              ^  ^  ^
+#    .---------*  |  *---------.
+#    |            |            |
+#    |            |            |
+#`signer 0`   `signer 1`   `signer 2`
+
 set -ueo pipefail
 
 naka3="../../naka3.sh"
@@ -10,7 +25,7 @@ rm -rf "/tmp/one-miner"
 "$naka3" -c "./config-signer-1.sh" signer 1 config
 "$naka3" -c "./config-signer-2.sh" signer 2 config
 
-"$naka3" node 0 config-miner
+"$naka3" node 0 config-miner-stacker "0,1,2"
 
 btcaddr="$("$naka3" node 0 miner-addr | jq -r '.BTC')"
 
@@ -23,7 +38,7 @@ echo "Miner address is $btcaddr"
 "$naka3" -c "./config-signer-1.sh" signer 1 start
 "$naka3" -c "./config-signer-2.sh" signer 2 start
 
-"$naka3" node 0 start-miner
+"$naka3" node 0 start-miner-stacker "0,1,2"
 
 # advance to epoch 2.5 (starts at 108)
 for i in $(seq 0 10); do

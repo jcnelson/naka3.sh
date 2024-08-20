@@ -1,5 +1,20 @@
 #!/bin/bash
 
+# Topology:
+#
+#
+#            `bitcoind 0` <----------------> `bitcoind 1`
+#                 |                              |
+#                 |                              |
+#                 V                              V
+#             `stacks 0`  <---------------->  `stacks 1`
+#             `(miner) `                      `(miner) `
+#              ^  ^  ^
+#    .---------*  |  *---------.
+#    |            |            |
+#    |            |            |
+#`signer 0`   `signer 1`   `signer 2`
+
 set -ueo pipefail
 
 naka3="../../naka3.sh"
@@ -10,8 +25,8 @@ rm -rf "/tmp/two-miners"
 "$naka3" -c "./config-signer-1.sh" signer 1 config
 "$naka3" -c "./config-signer-2.sh" signer 2 config
 
-"$naka3" -c "./config-miner-0.sh" node 0 config-miner
-"$naka3" -c "./config-miner-1.sh" node 1 config-miner
+"$naka3" -c "./config-miner-0.sh" node 0 config-miner-stacker "0,1,2"
+"$naka3" -c "./config-miner-1.sh" node 1 config-miner "none"
 
 btcaddr_0="$("$naka3" -c "./config-miner-0.sh" node 0 miner-addr | jq -r '.BTC')"
 btcaddr_1="$("$naka3" -c "./config-miner-1.sh" node 1 miner-addr | jq -r '.BTC')"
@@ -37,8 +52,8 @@ done
 "$naka3" -c "./config-signer-2.sh" signer 2 start
 
 # boot miner nodes
-"$naka3" -c "./config-miner-0.sh" node 0 start-miner
-"$naka3" -c "./config-miner-1.sh" node 1 start-miner
+"$naka3" -c "./config-miner-0.sh" node 0 start-miner-stacker "0,1,2"
+"$naka3" -c "./config-miner-1.sh" node 1 start-miner "none"
 
 # advance to epoch 2.5 (starts at 108)
 for i in $(seq 0 8); do
@@ -60,7 +75,7 @@ done
 
 while true; do
    "$naka3" -c "./config-bitcoind-0.sh" bitcoind mine 1 "$btcaddr_0"
-   sleep 0.75s
+   sleep 15s
    
    "$naka3" -c "./config-bitcoind-0.sh" bitcoind mine 1 "$btcaddr_0"
    sleep 15s
