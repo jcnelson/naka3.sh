@@ -7,6 +7,7 @@ bootstrap_node = "@@SEED_NODE_PUBKEY@@@@@SEED_NODE_HOST@@:@@SEED_NODE_P2P_PORT@@
 seed = "@@STACKS_MINER_KEY@@"
 local_peer_seed = "@@STACKS_PEER_KEY@@"
 miner = @@STACKS_MINER@@
+stacker = @@STACKS_STACKER@@
 working_dir = "@@STACKS_DATA_DIR@@"
 wait_time_for_microblocks = 0
 mine_microblocks = false
@@ -15,6 +16,8 @@ use_test_genesis_chainstate = true
 pox_sync_sample_secs = 0
 wait_time_for_blocks = 200
 microblock_frequency = 1000
+
+fault_injection_block_push_fail_probability = 50
 
 [miner]
 min_tx_fee = 1
@@ -28,11 +31,17 @@ wait_on_signers_ms = 10_000
 
 [connection_options]
 public_ip_address = "@@STACKS_PUBLIC_HOST@@:@@STACKS_P2P_PORT@@"
-block_proposal_token = "12345"
+auth_token = "12345"
+timeout = 15
+connect_timeout = 15
+handshake_timeout = 15
+idle_timeout = 15
+dns_timeout = 15
 
 [burnchain]
 chain = "bitcoin"
 mode = "nakamoto-neon"
+peer_version = 11
 poll_time_secs = 1
 magic_bytes = "T3"
 pox_prepare_length = 5
