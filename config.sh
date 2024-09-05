@@ -24,6 +24,7 @@ _CONF_BITCOIN_HOST="192.168.4.45"
 # e7632f313c38dcc20a87b189c294094cd4af07ac22369669a2d8a41afbf76adc
 _CONF_SEED_NODE_PUBKEY="03c3fadc32ef7a48fe384320542533ed12ea3905f9000f030abf2ab0f08f576169"
 _CONF_SEED_NODE_HOST="192.168.4.45"
+_CONF_SEED_NODE_RPC_PORT=20443
 _CONF_SEED_NODE_P2P_PORT=20444
 
 # PoX address
@@ -118,6 +119,10 @@ function conf_get_stacks_node_data_dir() {
 
 function conf_get_seed_host() {
    echo "$_CONF_SEED_NODE_HOST"
+}
+
+function conf_get_seed_rpc_port() {
+   echo "$_CONF_SEED_NODE_RPC_PORT"
 }
 
 function conf_get_seed_p2p_port() {
