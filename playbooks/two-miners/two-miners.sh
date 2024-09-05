@@ -52,8 +52,8 @@ done
 "$naka3" -c "./config-signer-2.sh" signer 2 start
 
 # boot miner nodes
-"$naka3" -c "./config-miner-0.sh" node 0 start-miner-stacker "0,1,2"
-"$naka3" -c "./config-miner-1.sh" node 1 start-miner "none"
+"$naka3" -c "./config-miner-0.sh" node 0 start
+"$naka3" -c "./config-miner-1.sh" node 1 start
 
 # advance to epoch 2.5 (starts at 108)
 for i in $(seq 0 8); do
