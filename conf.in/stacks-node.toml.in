@@ -53,6 +53,7 @@ password = "naka3"
 rpc_port = @@BITCOIN_RPC_PORT@@
 peer_port = @@BITCOIN_P2P_PORT@@
 wallet_name = "main"
+# @@fault_injection_burnchain_block_delay@@
 
 [[burnchain.epochs]]
 epoch_name = "1.0"
