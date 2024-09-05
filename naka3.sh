@@ -471,31 +471,45 @@ function make_node_config() {
    return 0
 }
 
+# Set a fault injection in the existing node config.
+# $1: config file path
+# $2: fault name
+# $3: fault value
+function add_node_fault_injection() {
+   local node_config_path="$1"
+   local fault_name="$2"
+   local fault_value="$3"
+
+   if ! [ -f "$node_config_path" ]; then 
+      exit_error "No such file or directory: $conf_path"
+   fi
+
+   sed -i \
+      -e "s!# @@${fault_name}@@!${fault_name} = ${fault_value}!g" \
+      "$node_config_path"
+
+   return 0
+}
+
 # Start a stacks node.
 # Call _after_ generating signer configs
 # Writes the PID to the given .pid file
 # $1: config file
 # $2: node ID
-# $3: is miner?
-# $4: is stacker?
-# $5: signer IDs as a CSV (pass 'none' to skip)
 # prints the result
 function start_node() {
    local conf_path="$1"
    local node_id="$2"
-   local miner="$3"
-   local stacker="$4"
-   local signers="$5"
    local pid_path
-   local node_config_template_path
-   local node_config_path
    local datadir
+
+   node_config_path="$(get_node_config_path "$conf_path" "$node_id")"
+   if ! [ -f "$node_config_path" ]; then
+      exit_error "ERROR: cannot start node $node_id: no such config file $node_config_path"
+   fi
 
    pid_path="$(get_node_pid_path "$conf_path" "$node_id")"
    logfile="$(get_node_logfile_path "$conf_path" "$node_id")"
-   node_config_template_path="$(get_node_template_path)"
-   node_event_observer_config_template_path="$(get_node_event_observer_template_path)"
-   node_config_path="$(make_node_config "$conf_path" "$node_id" "$node_config_template_path" "$node_event_observer_config_template_path" "$miner" "$stacker" "$signers")"
    datadir="$(get_node_data_dir "$conf_path" "$node_id")"
 
    if [ -f "$pid_path" ]; then
@@ -731,6 +745,128 @@ function make_stacking_tx() {
       -e "u${auth_id}"
 }
 
+# Get an account's nonce
+# $1: config
+# $2: address
+function get_account_nonce() {
+   local conf_path="$1"
+   local address="$2"
+   local stacks_host
+   local stacks_port
+   local nonce
+
+   stacks_host="$(conf_get_seed_host)"
+   stacks_port="$(conf_get_seed_rpc_port)"
+   nonce="$(curl -sL "http://${stacks_host}:${stacks_port}/v2/accounts/${address}?proof=0" | jq -r '.nonce')"
+   echo "$nonce"
+}
+
+# Send a transaction
+# $1: transaction hex
+# $2: host 
+# $3: port
+function send_tx() {
+   local tx="$1"
+   local stacks_host="$2"
+   local stacks_port="$3"
+
+   local content_length
+
+   content_length="${#tx}"
+   content_length=$((content_length / 2))
+
+   echo -n "$tx" | xxd -r -p | \
+      curl -sL -X POST -H "content-type: application/octet-stream" -H "content-length: $content_length" --data-binary @- "http://${stacks_host}:${stacks_port}/v2/transactions"
+}
+
+# Make a stx-transfer transaction.
+# Automatically fetches the right nonce.
+# The fee rate is hard-coded to 360, which is 2x a single-sig stx-transfer's length
+# $1: config
+# $2: private key
+# $3: amount
+# $4: recipient address
+# $5: memo
+function make_stx_transfer() {
+   local conf_file="$1"
+   local private_key="$2"
+   local amount="$3"
+   local recipient="$4"
+   local memo="$5"
+   local address
+   local nonce
+
+   address="$(run_blockstack_cli addresses "$private_key" | jq -r '.STX')"
+   nonce="$(get_account_nonce "$conf_file" "$address")"
+
+   run_blockstack_cli token-transfer \
+      "$private_key" \
+      "360" \
+      "$nonce" \
+      "$recipient" \
+      "$amount" \
+      "$memo"
+}
+
+# Continuously send a stx-transfer transaction from an address, for a given amount, to a given recipient
+# $1: config
+# $2: private key
+# $3: amount
+# $4: recipient address
+# $5: sleep time between transmission
+# $6: abort file -- if this file exists, then this loop breaks
+function begin_stx_transfers() {
+   local conf_file="$1"
+   local private_key="$2"
+   local amount="$3"
+   local recipient="$4"
+   local sleep_time="$5"
+   local abort_file="$6"
+
+   local tx
+   local stacks_host
+   local stacks_port
+   local content_length
+   local address
+   local nonce
+   local response
+   
+   address="$(run_blockstack_cli addresses "$private_key" | jq -r '.STX')"
+   nonce="$(get_account_nonce "$conf_file" "$address")"
+   stacks_host="$(conf_get_seed_host)"
+   stacks_port="$(conf_get_seed_rpc_port)"
+
+   while ! [ -f "$abort_file" ]; do
+      tx="$(run_blockstack_cli token-transfer \
+         "$private_key" \
+         "360" \
+         "$nonce" \
+         "$recipient" \
+         "$amount" \
+         "naka3")"
+
+      content_length="${#tx}"
+      content_length=$((content_length / 2))
+
+      set -e
+      response="$(send_tx "$tx" "$stacks_host" "$stacks_port")"
+
+      if [ -z "$(echo "$response" | jq -r '.error' 2>/dev/null)" ]; then
+         nonce=$((nonce + 1))
+      fi
+      set +e
+
+      sleep "$sleep_time"
+   done
+}
+
+# Stop a running begin_stx_transfers loop
+# $1: abort file
+function end_stx_transfers() {
+   local abort_file="$1"
+
+   touch "$abort_file"
+}
 
 # Print usage and exit 
 # $1: subcommand usage
@@ -747,13 +883,16 @@ function usage() {
          exit_error "Usage: $PROGNAME signer [signer_id] config|start|stop|logs|stack-tx"
          ;;
       node)
-         exit_error "Usage: $PROGNAME node [node_id] config-miner|config-follower|config-miner-stacker|config-follower-stacker|miner-addr|start-miner|start-miner-stacker|start-follower|start-follower-stacker|stop|logs"
+         exit_error "Usage: $PROGNAME node [node_id] config-miner|config-follower|config-miner-stacker|config-follower-stacker|miner-addr|start|stop|logs"
+         ;;
+      tx)
+         exit_error "Usage: $PROGNAME tx transfer|begin-transfers|end-transfers [args...]"
          ;;
       "$PROGNAME")
          exit_error "Need a command"
          ;;
       *)
-         exit_error "Unrecognized command '$cmd'. Options are bitcoind, signer, node"
+         exit_error "Unrecognized command '$cmd'. Options are bitcoind, bitcoin-cli, signer, node, tx"
          ;;
    esac
 }
@@ -931,10 +1070,6 @@ function main() {
 
          local subcmd="$3"
          debug "Subcommand is '$subcmd'"
-
-         local signers="$4"
-         debug "Signers is '$signers'"
-
          set -ue
 
          if [ -z "$node_id" ]; then
@@ -943,10 +1078,6 @@ function main() {
 
          if [ -z "$subcmd" ]; then
             usage "node"
-         fi
-
-         if [ -z "$signers" ]; then
-            signers="none"
          fi
 
          case "$subcmd" in
@@ -960,6 +1091,15 @@ function main() {
 
             config-miner)
                echo -n "Making miner config for node '$node_id'... "
+               set +ue
+               local signers="$4"
+               debug "Signers is '$signers'"
+
+               if [ -z "$signers" ]; then
+                  signers="none"
+               fi
+               set -ue
+
                local node_config_path
                node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "true" "false" "$signers")"
 
@@ -968,6 +1108,15 @@ function main() {
             
             config-miner-stacker)
                echo -n "Making miner-stacker config for node '$node_id'... "
+               set +ue
+               local signers="$4"
+               debug "Signers is '$signers'"
+
+               if [ -z "$signers" ]; then
+                  signers="none"
+               fi
+               set -ue
+
                local node_config_path
                node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "true" "true" "$signers")"
 
@@ -976,6 +1125,15 @@ function main() {
             
             config-follower)
                echo -n "Making follower config for node '$node_id'... "
+               set +ue
+               local signers="$4"
+               debug "Signers is '$signers'"
+
+               if [ -z "$signers" ]; then
+                  signers="none"
+               fi
+               set -ue
+
                local node_config_path
                node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "false" "false" "$signers")"
 
@@ -984,30 +1142,46 @@ function main() {
             
             config-follower-stacker)
                echo -n "Making follower-stacker config for node '$node_id'... "
+               set +ue
+               local signers="$4"
+               debug "Signers is '$signers'"
+
+               if [ -z "$signers" ]; then
+                  signers="none"
+               fi
+               set -ue
+
                local node_config_path
                node_config_path="$(make_node_config "$CONFIG" "$node_id" "$(get_node_template_path)" "$(get_node_event_observer_template_path)" "false" "true" "$signers")"
 
                echo "$node_config_path"
                ;;
 
-            start-miner)
-               echo -n "Starting miner node '$node_id'... "
-               start_node "$CONFIG" "$node_id" "true" "false" "$signers"
+            config-fault-injection)
+               echo -n "Setting fault-injection for node '$node_id'..."
+               set +ue
+               local fault_name="$4"
+               local fault_value="$5"
+               debug "Fault name is '$fault_name'"
+               debug "Fault value is '$fault_value'"
+
+               if [ -z "$fault_name" ]; then
+                  usage "node"
+               fi
+               if [ -z "$fault_value" ]; then
+                  usage "node"
+               fi
+               set -ue
+
+               local node_config_path
+               node_config_path="$(get_node_config_path "$CONFIG" "$node_id")"
+               add_node_fault_injection "$node_config_path" "$fault_name" "$fault_value"
+               echo "$fault_name"
                ;;
-            
-            start-miner-stacker)
-               echo -n "Starting miner-stacker node '$node_id'... "
-               start_node "$CONFIG" "$node_id" "true" "true" "$signers"
-               ;;
-            
-            start-follower)
-               echo -n "Starting follower node '$node_id'... "
-               start_node "$CONFIG" "$node_id" "false" "$stacker" "$signers"
-               ;;
-            
-            start-follower-stacker)
-               echo -n "Starting follower-stacker node '$node_id'... "
-               start_node "$CONFIG" "$node_id" "false" "true" "$signers"
+
+            start)
+               echo -n "Starting node '$node_id'... "
+               start_node "$CONFIG" "$node_id"
                ;;
 
             stop)
@@ -1040,16 +1214,107 @@ function main() {
                node_conf_path="$(get_node_config_path "$CONFIG" "$node_id")"
                stacks_host="$(conf_get_stacks_host)"
                rpcport="$(conf_get_stacks_rpc_port)"
-               content_length="${#tx}"
-               content_length=$((content_length / 2))
 
-               echo -n "$tx" | xxd -r -p | \
-                   curl -X POST -H "content-type: application/octet-stream" -H "content-length: $content_length" --data-binary @- "http://${stacks_host}:${rpcport}/v2/transactions"
-                                 
+               send_tx "$tx" "$stacks_host" "$rpcport"
                ;;
                
             *)
                usage "node"
+               ;;
+         esac
+         ;;
+
+      tx)
+         local subcmd="$2"
+         debug "Subcmmand is '$subcmd'"
+         case "$subcmd" in
+            transfer)
+               local private_key
+               local amount
+               local recipient
+
+               set +ue
+               private_key="$3"
+               amount="$4"
+               recipient="$5"
+               memo="$6"
+               set -ue
+
+               if [ -z "$private_key" ]; then
+                  echo >&2 "No private key given"
+                  usage "tx"
+               fi
+               if [ -z "$amount" ]; then
+                  echo >&2 "No amount given"
+                  usage "tx"
+               fi
+               if [ -z "$recipient" ]; then
+                  echo >&2 "No recipient given"
+                  usage "tx"
+               fi
+
+               source "$CONFIG"
+               make_stx_transfer "$CONFIG" "$private_key" "$amount" "$recipient" "$memo"
+               ;;
+
+            begin-transfers)
+               local private_key
+               local amount
+               local recipient
+               local sleep_time
+               local abort_file
+               
+               set +ue
+               private_key="$3"
+               amount="$4"
+               recipient="$5"
+               sleep_time="$6"
+               abort_file="$7"
+               set -ue
+               
+               if [ -z "$private_key" ]; then
+                  echo >&2 "No private key given"
+                  usage "tx"
+               fi
+               if [ -z "$amount" ]; then
+                  echo >&2 "No amount given"
+                  usage "tx"
+               fi
+               if [ -z "$recipient" ]; then
+                  echo >&2 "No recipient given"
+                  usage "tx"
+               fi
+               if [ -z "$sleep_time" ]; then
+                  echo >&2 "No sleep time given"
+                  usage "tx"
+               fi
+               if [ -z "$abort_file" ]; then
+                  echo >&2 "No abort file given"
+                  usage "tx"
+               fi
+
+               source "$CONFIG"
+               begin_stx_transfers "$CONFIG" "$private_key" "$amount" "$recipient" "$sleep_time" "$abort_file"
+               ;;
+
+            end-transfers)
+               local abort_file
+               
+               set +ue
+               abort_file="$3"
+               set -ue
+               
+               if [ -z "$abort_file" ]; then
+                  echo >&2 "No abort file given"
+                  usage "tx"
+               fi
+               
+               source "$CONFIG"
+               end_stx_transfers "$abort_file"
+               ;;
+
+            *)
+               usage "tx"
                ;;
          esac
          ;;
