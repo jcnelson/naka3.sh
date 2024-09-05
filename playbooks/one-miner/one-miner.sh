@@ -38,7 +38,7 @@ echo "Miner address is $btcaddr"
 "$naka3" -c "./config-signer-1.sh" signer 1 start
 "$naka3" -c "./config-signer-2.sh" signer 2 start
 
-"$naka3" node 0 start-miner-stacker "0,1,2"
+"$naka3" node 0 start
 
 # advance to epoch 2.5 (starts at 108)
 for i in $(seq 0 10); do
@@ -59,6 +59,13 @@ for i in $(seq 0 20); do
    "$naka3" bitcoind mine 1 "$btcaddr"
    sleep 15s
 done
+
+"$naka3" tx begin-transfers \
+   "cb3df38053d132895220b9ce471f6b676db5b9bf0b4adefb55f2118ece2478df01" \
+   123 \
+   "ST11NJTTKGVT6D1HY4NJRVQWMQM7TVAR091EJ8P2Y" \
+   1 \
+   "/tmp/one-miner/end-transfers" &
 
 # run forever, but only mine on command
 while true; do
