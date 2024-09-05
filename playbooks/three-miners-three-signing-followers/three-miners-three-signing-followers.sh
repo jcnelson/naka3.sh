@@ -9,7 +9,7 @@
 #                 V                    V                    V                    V                    V                    V
 #             `stacks 0`  <----->  `stacks 1`  <----->  `stacks 2`  <----->  `stacks 3`  <----->  `stacks 4`  <----->  `stacks 5`
 #             `(miner) `           `(miner) `           `(miner) `           `(follower)`         `(follower)`         `(follower)`
-#                                                                                ^                    ^                    ^
+#                                   (slow)                                       ^                    ^                    ^
 #                                                                                |                    |                    |
 #                                                                                |                    |                    |
 #                                                                            `signer 0`           `signer 1`           `signer 2`
@@ -31,6 +31,9 @@ rm -rf "/tmp/three-miners-three-signing-followers"
 "$naka3" -c "./config-follower-0.sh" node 3 config-follower-stacker 0 
 "$naka3" -c "./config-follower-1.sh" node 4 config-follower-stacker 1
 "$naka3" -c "./config-follower-2.sh" node 5 config-follower-stacker 2
+
+# make miner 1 slow to receive bitcoin blocks (by 5 seconds)
+"$naka3" -c "./config-miner-1.sh" node 1 config-fault-injection "fault_injection_burnchain_block_delay" "10000"
 
 btcaddr_0="$("$naka3" -c "./config-miner-0.sh" node 0 miner-addr | jq -r '.BTC')"
 btcaddr_1="$("$naka3" -c "./config-miner-1.sh" node 1 miner-addr | jq -r '.BTC')"
@@ -100,14 +103,14 @@ done
 "$naka3" -c "./config-signer-2.sh" signer 2 start
 
 # boot miner nodes
-"$naka3" -c "./config-miner-0.sh" node 0 start-miner "none"
-"$naka3" -c "./config-miner-1.sh" node 1 start-miner "none"
-"$naka3" -c "./config-miner-2.sh" node 2 start-miner "none"
+"$naka3" -c "./config-miner-0.sh" node 0 start
+"$naka3" -c "./config-miner-1.sh" node 1 start
+"$naka3" -c "./config-miner-2.sh" node 2 start
 
 # boot follower nodes
-"$naka3" -c "./config-follower-0.sh" node 3 start-follower-stacker 0
-"$naka3" -c "./config-follower-1.sh" node 4 start-follower-stacker 1
-"$naka3" -c "./config-follower-2.sh" node 5 start-follower-stacker 2
+"$naka3" -c "./config-follower-0.sh" node 3 start
+"$naka3" -c "./config-follower-1.sh" node 4 start
+"$naka3" -c "./config-follower-2.sh" node 5 start
 
 # advance to epoch 2.5 (starts at 108)
 for i in $(seq 0 5); do
@@ -126,6 +129,13 @@ for i in $(seq 0 20); do
    "$naka3" -c "./config-bitcoind-0.sh" bitcoind mine 1 "$btcaddr_0"
    sleep 15s
 done
+
+"$naka3" tx begin-transfers \
+   "cb3df38053d132895220b9ce471f6b676db5b9bf0b4adefb55f2118ece2478df01" \
+   123 \
+   "ST11NJTTKGVT6D1HY4NJRVQWMQM7TVAR091EJ8P2Y" \
+   1 \
+   "/tmp/three-miners-three-signing-followers/end-transfers" &
 
 while true; do
    "$naka3" -c "./config-bitcoind-0.sh" bitcoind mine 1 "$btcaddr_0"

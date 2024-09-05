@@ -2,6 +2,7 @@
 
 naka3="../../naka3.sh"
 
+"$naka3" end-transfers "/tmp/three-miners-three-signing-followers/end-transfers"
 "$naka3" -c "./config-miner-0.sh" node 0 stop
 "$naka3" -c "./config-miner-1.sh" node 1 stop
 "$naka3" -c "./config-miner-2.sh" node 2 stop
